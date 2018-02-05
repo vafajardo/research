@@ -37,7 +37,7 @@ logdir = "{}/run-{}/".format(root_logdir, now)
 mnist = input_data.read_data_sets("/tmp/data/")
 
 # Construction phase
-n_s = 350
+n_s = 100
 n_inputs = 28*28 - n_s
 # encoders
 n_hidden1 = 500
@@ -52,86 +52,88 @@ n_hidden7 = 500
 # final output can take a random sample from the posterior
 n_outputs = n_inputs + n_s
 
-tf.reset_default_graph()
+alpha = 1
+learning_rate = 0.001
 
 with tf.contrib.framework.arg_scope(
         [fully_connected],
         activation_fn = tf.nn.elu,
         weights_initializer = tf.contrib.layers.variance_scaling_initializer()):
-    X = tf.placeholder(tf.float32, shape = [None, n_inputs])
-    s = tf.placeholder(tf.float32, shape = [None, n_s])
+    X = tf.placeholder(tf.float32, shape = [None, n_inputs], name="X_wo_s")
+    s = tf.placeholder(tf.float32, shape = [None, n_s], name="s")
     X_full = tf.concat([X,s], axis=1)
-    y = tf.placeholder(tf.int32, shape = [None, 1])
+    y = tf.placeholder(tf.int32, shape = [None, 1], name="y")
     is_unlabelled = tf.placeholder(tf.bool, shape=(), name='is_training')
-    hidden1 = fully_connected(tf.concat([X, s], axis=1), n_hidden1)
-    hidden2_mean = fully_connected(hidden1, n_hidden2, activation_fn = None)
-    hidden2_gamma = fully_connected(hidden1, n_hidden2, activation_fn = None)
-    hidden2_sigma = tf.exp(0.5 * hidden2_gamma)
+    with tf.name_scope("X_encoder"):
+        hidden1 = fully_connected(tf.concat([X, s], axis=1), n_hidden1)
+        hidden2_mean = fully_connected(hidden1, n_hidden2, activation_fn = None)
+        hidden2_gamma = fully_connected(hidden1, n_hidden2, activation_fn = None)
+        hidden2_sigma = tf.exp(0.5 * hidden2_gamma)
     noise1 = tf.random_normal(tf.shape(hidden2_sigma), dtype=tf.float32)
-    hidden2 = hidden2_mean + hidden2_sigma * noise1
-    hidden3_ygz = fully_connected(hidden2, n_hidden4, activation_fn = tf.nn.tanh)
-    hidden4_softmax_mean = fully_connected(hidden3_ygz, 10, activation_fn = tf.nn.softmax)
-    if is_unlabelled == True:
-        y = tf.assign(y, tf.multinomial(hidden4_softmax_mean, 1,
-                            output_type = tf.int32))
-        # y = tf.assign(y,argmax(hidden4_softmax_mean, axis=1,
-        #                     output_type=tf.int32)[:,tf.newaxis])
-    hidden3 = fully_connected(tf.concat([hidden2, tf.cast(y, tf.float32)], axis=1), n_hidden3, activation_fn=tf.nn.tanh)
-    hidden4_mean = fully_connected(hidden3, n_hidden4, activation_fn = None)
-    hidden4_gamma = fully_connected(hidden3, n_hidden4, activation_fn = None)
-    hidden4_sigma = tf.exp(0.5 * hidden4_gamma)
+    hidden2 = hidden2_mean + hidden2_sigma * noise1         # z1
+    with tf.name_scope("Z1_encoder"):
+        hidden3_ygz1 = fully_connected(hidden2, n_hidden4, activation_fn = tf.nn.tanh)
+        hidden4_softmax_mean = fully_connected(hidden3_ygz1, 10, activation_fn = tf.nn.softmax)
+        if is_unlabelled == True:
+            # impute by sampling from q(y|z1)
+            y = tf.assign(y, tf.multinomial(hidden4_softmax_mean, 1,
+                                output_type = tf.int32))
+        hidden3 = fully_connected(tf.concat([hidden2, tf.cast(y, tf.float32)], axis=1),
+                        n_hidden3, activation_fn=tf.nn.tanh)
+        hidden4_mean = fully_connected(hidden3, n_hidden4, activation_fn = None)
+        hidden4_gamma = fully_connected(hidden3, n_hidden4, activation_fn = None)
+        hidden4_sigma = tf.exp(0.5 * hidden4_gamma)
     noise2 = tf.random_normal(tf.shape(hidden4_sigma), dtype=tf.float32)
-    hidden4 = hidden4_mean + hidden4_sigma * noise2
-    hidden5 = fully_connected(tf.concat([hidden4, tf.cast(y, tf.float32)], axis=1 ), n_hidden5, activation_fn = tf.nn.tanh)
-    hidden6_mean = fully_connected(hidden5, n_hidden6, activation_fn = None)
-    hidden6_gamma = fully_connected(hidden5, n_hidden6, activation_fn = None)
-    hidden6_sigma = tf.exp(0.5 * hidden6_gamma)
+    hidden4 = hidden4_mean + hidden4_sigma * noise2     # z2
+    with tf.name_scope("Z1_decoder"):
+        hidden5 = fully_connected(tf.concat([hidden4, tf.cast(y, tf.float32)], axis=1 ),
+                    n_hidden5, activation_fn = tf.nn.tanh)
+        hidden6_mean = fully_connected(hidden5, n_hidden6, activation_fn = None)
+        hidden6_gamma = fully_connected(hidden5, n_hidden6, activation_fn = None)
+        hidden6_sigma = tf.exp(0.5 * hidden6_gamma)
     noise3 = tf.random_normal(tf.shape(hidden6_sigma), dtype=tf.float32)
-    hidden6 = hidden6_mean + hidden6_sigma * noise3
-    hidden7 = fully_connected(tf.concat([hidden6, s], axis=1), n_hidden7,
-                             activation_fn = tf.nn.tanh)
-    hidden8 = fully_connected(hidden7, n_outputs, activation_fn = None)
-    outputs = tf.sigmoid(hidden8)
+    hidden6 = hidden6_mean + hidden6_sigma * noise3     # z1 (decoded)
+    with tf.name_scope("X_decoder"):
+        hidden7 = fully_connected(tf.concat([hidden6, s], axis=1), n_hidden7,
+                                 activation_fn = tf.nn.tanh)
+        hidden8 = fully_connected(hidden7, n_outputs, activation_fn = None)
+    outputs = tf.sigmoid(hidden8, name="decoded_X")
 
 # expected lower bound
-kl_z2 = 0.5 * tf.reduce_sum(
-                tf.exp(hidden4_gamma)
-                + tf.square(hidden4_mean)
-                - 1
-                - hidden4_gamma
-                )
+with tf.name_scope("ELB"):
+    kl_z2 = 0.5 * tf.reduce_sum(
+                    tf.exp(hidden4_gamma)
+                    + tf.square(hidden4_mean)
+                    - 1
+                    - hidden4_gamma
+                    )
 
-kl_z1 = 0.5 * (tf.reduce_sum(
-                (1 / (1e-10 + tf.exp(hidden6_gamma))) * tf.exp(hidden2_gamma)
-                - 1
-                + hidden6_gamma
-                - hidden2_gamma
-                ) + tf.einsum('ij,ji -> i',
-                    (hidden6_mean-hidden2_mean) * (1 / (1e-10 + tf.exp(hidden6_gamma))),
-                    tf.transpose((hidden6_mean-hidden2_mean))))
+    kl_z1 = 0.5 * (tf.reduce_sum(
+                    (1 / (1e-10 + tf.exp(hidden6_gamma))) * tf.exp(hidden2_gamma)
+                    - 1
+                    + hidden6_gamma
+                    - hidden2_gamma
+                    ) + tf.einsum('ij,ji -> i',
+                        (hidden6_mean-hidden2_mean) * (1 / (1e-10 + tf.exp(hidden6_gamma))),
+                        tf.transpose((hidden6_mean-hidden2_mean))))
 
-# foo = tf.einsum('ij,ji -> i',
-#                     (hidden6_mean - hidden2_mean) * (1 / (eps + tf.exp(hidden6_gamma))),
-#                     tf.transpose((hidden6_mean-hidden2_mean)))
+    indices = tf.range(tf.shape(y)[0])
+    indices = tf.concat([indices[:, tf.newaxis], y], axis=1)
+    eps = 1e-10
+    log_q_y_z1 = tf.reduce_sum(tf.log(eps + tf.gather_nd(hidden4_softmax_mean, indices)))
 
-indices = tf.range(tf.shape(y)[0])
-indices = tf.concat([indices[:, tf.newaxis], y], axis=1)
-eps = 1e-10
-log_q_y_z1 = tf.reduce_sum(tf.log(eps + tf.gather_nd(hidden4_softmax_mean, indices)))
+    # Bernoulli log-likelihood
+    reconstruction_loss = -(tf.reduce_sum(X_full * tf.log(outputs)
+                            + (1 - X_full) * tf.log(1 - outputs)))
+    cost = kl_z2 + kl_z1 + reconstruction_loss + alpha * log_q_y_z1
 
-# Bernoulli likelihood
-reconstruction_loss = -(tf.reduce_sum(X_full * tf.log(outputs)
-                        + (1 - X_full) * tf.log(1 - outputs)))
-
-alpha = 1
-cost = kl_z2 + kl_z1 + reconstruction_loss + alpha * log_q_y_z1
-
-learning_rate = 0.001
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
 training_op = optimizer.minimize(cost)
 
+cost_summary = tf.summary.scalar('ELB', cost)
+file_writer = tf.summary.FileWriter(logdir, tf.get_default_graph())
 init = tf.global_variables_initializer()
-saver = tf.train.Saver()
+# saver = tf.train.Saver()
 
 # Training
 n_epochs = 50
@@ -167,13 +169,16 @@ with tf.Session() as sess:
         # saver.save(sess, "./my_model_all_layers.ckpt")
 
     # generating digits
-    codings_rnd = np.random.normal(scale=2,size=[n_digits, n_hidden2])
+    # codings_rnd = np.random.normal(scale=2,size=[n_digits, n_hidden2])
     s_rnd = X_batch[:n_digits, -n_s:]
     # s_rnd = np.random.choice(2, size=[n_digits, n_s], p = [0.98, 0.02])
-    outputs_val = outputs.eval(feed_dict={hidden2: codings_rnd,
+    codings_rnd = X_batch[:n_digits, :-n_s]
+    outputs_val = outputs.eval(feed_dict={X: codings_rnd,
                                         s: s_rnd,
                                         y: np.zeros((n_digits,1), dtype=np.int32),
                                         is_unlabelled: True})
+
+file_writer.close()
 
 # Plotting the generated digits
 n_rows = 6
