@@ -37,7 +37,7 @@ logdir = "{}/run-{}/".format(root_logdir, now)
 mnist = input_data.read_data_sets("/tmp/data/")
 
 # Construction phase
-n_s = 100
+n_s = 10
 n_inputs = 28*28 - n_s
 # encoders
 n_hidden1 = 500
@@ -169,11 +169,11 @@ with tf.Session() as sess:
         # saver.save(sess, "./my_model_all_layers.ckpt")
 
     # generating digits
-    # codings_rnd = np.random.normal(scale=2,size=[n_digits, n_hidden2])
+    codings_rnd = np.random.normal(scale=2,size=[n_digits, n_hidden2])
     s_rnd = X_batch[:n_digits, -n_s:]
     # s_rnd = np.random.choice(2, size=[n_digits, n_s], p = [0.98, 0.02])
-    codings_rnd = X_batch[:n_digits, :-n_s]
-    outputs_val = outputs.eval(feed_dict={X: codings_rnd,
+    # codings_rnd = X_batch[:n_digits, :-n_s]
+    outputs_val = outputs.eval(feed_dict={hidden2: codings_rnd,
                                         s: s_rnd,
                                         y: np.zeros((n_digits,1), dtype=np.int32),
                                         is_unlabelled: True})
