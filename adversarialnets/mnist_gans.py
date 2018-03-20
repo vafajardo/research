@@ -24,10 +24,10 @@ mnist = input_data.read_data_sets("/tmp/data/")
 # Construction phase
 ### For simplicity, I set G and D to have the same architecture
 n_inputs = 28*28
-n_G_hidden1 = 200
-n_G_hidden2 = 200
-n_D_hidden1 = 196
-n_D_hidden2 = 98
+n_G_hidden1 = 400
+n_G_hidden2 = 400
+n_D_hidden1 = 392
+n_D_hidden2 = 392
 n_outputs = n_inputs
 
 # Placeholder for minibatch sample from true observations
@@ -41,15 +41,16 @@ G_logits = fully_connected(G_hidden2, n_outputs, activation_fn=None)
 G_outputs = tf.sigmoid(G_logits)
 
 # Discriminator -- uses maxout units as in the original paper
-with tf.variable_scope("discriminator"):
-    D_hidden1 = maxout(G_outputs, n_D_hidden1)
-    D_hidden2 = maxout(tf.reshape(D_hidden1,(-1,n_D_hidden1)), n_D_hidden2)
-    D_outputs_from_G = fully_connected(tf.reshape(D_hidden2,(-1,n_D_hidden2)), 1, activation_fn=tf.nn.sigmoid)
+def get_discriminative_probability(x, reuse=False):
+    with tf.variable_scope("discriminator", reuse=reuse):
+        D_hidden1 = maxout(x, n_D_hidden1)
+        D_hidden2 = maxout(tf.reshape(D_hidden1,(-1,n_D_hidden1)), n_D_hidden2)
+        outputs = fully_connected(tf.reshape(D_hidden2,(-1,n_D_hidden2)),
+                            1, activation_fn=tf.nn.sigmoid)
+        return outputs
 
-with tf.variable_scope("discriminator", reuse=True):
-    D_hidden1 = maxout(X, n_D_hidden1)
-    D_hidden2 = maxout(tf.reshape(D_hidden1,(-1,n_D_hidden1)), n_D_hidden2)
-    D_outputs_from_X = fully_connected(tf.reshape(D_hidden2,(-1,n_D_hidden2)), 1, activation_fn=tf.nn.sigmoid)
+D_outputs_from_G = get_discriminative_probability(G_outputs)
+D_outputs_from_X = get_discriminative_probability(X, reuse=True)
 
 # MinMax problem
 D_objective = -(tf.reduce_mean(tf.log(1 - D_outputs_from_G))
@@ -57,7 +58,7 @@ D_objective = -(tf.reduce_mean(tf.log(1 - D_outputs_from_G))
 G_objective = tf.reduce_mean(tf.log(1 - D_outputs_from_G))
 
 # Instantiate the SGD optimizers
-learning_rate = 0.001
+learning_rate = 0.002
 D_optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
 G_optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
 D_training_op = D_optimizer.minimize(D_objective)
@@ -69,9 +70,10 @@ init = tf.global_variables_initializer()
 saver = tf.train.Saver()
 
 # Training params
-n_epochs = 50
+n_epochs = 10000
 batch_size = 150
-n_iter_D = 10
+n_iter_D = 1
+n_digits = 60
 
 with tf.Session() as sess:
     init.run()
@@ -90,3 +92,13 @@ with tf.Session() as sess:
                 feed_dict={X: X_batch})
         print("\r{}".format(epoch), "D obj value:", D_obj_value,
                  "\tG obj value:", G_obj_value)
+        saver.save(sess, "./my_model_all_layers.ckpt")
+    # generating digits
+    codings_rnd = np.random.normal(size=[n_digits, n_inputs])
+    outputs_val = G_outputs.eval(feed_dict={Z: codings_rnd})
+
+n_rows = 6
+n_cols = 10
+plot_multiple_images(outputs_val.reshape(-1, 28, 28), n_rows, n_cols)
+save_fig("gans_generated_digits_plot_k{}".format(n_iter_D))
+plt.show()
