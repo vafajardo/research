@@ -1,7 +1,9 @@
 images/*
 .ipynb_checkpoints/*
 notebooks/.ipynb_checkpoints/*
+autoencoders/.ipynb_checkpoints/*
 autoencoders/tf_logs/*
 adversarialnets/tf_logs/*
+adversarialnets/my_model*
 
 

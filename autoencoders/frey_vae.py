@@ -9,30 +9,39 @@ import sys
 from plotting import *
 from dataReader import data_reader
 
+# configure matplotlib
+plt.rcParams['figure.figsize'] = (13.5, 13.5) # set default size of plots
+plt.rcParams['image.interpolation'] = 'nearest'
+plt.rcParams['image.cmap'] = 'gray'
+
 """
 Training a VAE on frey dataset
 """
 
-def show_reconstructed_digits(X, outputs, model_path = None, n_test_digits = 2):
-    with tf.Session() as sess:
-        if model_path:
-            saver.restore(sess, model_path)
-        X_test = mnist.test.images[:n_test_digits]
-        outputs_val = outputs.eval(feed_dict={X: X_test})
+def show_examples(data, n=None, n_cols=20, thumbnail_cb=None):
+    if n is None:
+        n = len(data)
+    n_rows = int(np.ceil(n / float(n_cols)))
+    figure = np.zeros((img_rows * n_rows, img_cols * n_cols))
+    for k, x in enumerate(data[:n]):
+        r = k // n_cols
+        c = k % n_cols
+        figure[r * img_rows: (r + 1) * img_rows,
+               c * img_cols: (c + 1) * img_cols] = x
+        if thumbnail_cb is not None:
+            thumbnail_cb(locals())
 
-    fig = plt.figure(figsize=(8, 3 * n_test_digits))
-    for digit_index in range(n_test_digits):
-        plt.subplot(n_test_digits, 2, digit_index * 2 + 1)
-        plot_image(X_test[digit_index])
-        plt.subplot(n_test_digits, 2, digit_index * 2 + 2)
-        plot_image(outputs_val[digit_index])
+    plt.figure(figsize=(12, 10))
+    plt.imshow(figure)
+    plt.axis("off")
+    plt.tight_layout()
 
 # setup logdir
 now = datetime.utcnow().strftime("%Y%m%d%H%M%S")
 root_logdir = "tf_logs"
 logdir = "{}/run-{}/".format(root_logdir, now)
 
-# Loading Frey dataset 
+# Loading Frey dataset
 data_path = '/home/andrei/ml/datasets/'
 ff = loadmat(data_path + 'frey_rawface.mat', squeeze_me=True, struct_as_record=False)
 ff = ff["ff"].T # loadmat loads data as a dict, and we also need to transpose the data
@@ -42,7 +51,7 @@ ff = ff["ff"].T # loadmat loads data as a dict, and we also need to transpose th
 n_inputs = 28*20
 n_hidden1 = 200
 n_hidden2 = 200
-n_hidden3 = 2 # codings
+n_hidden3 = 20 # codings
 n_hidden4 = n_hidden2
 n_hidden5 = n_hidden1
 n_outputs = n_inputs
@@ -89,7 +98,7 @@ init = tf.global_variables_initializer()
 # saver = tf.train.Saver()
 
 # Training/Testing params
-n_epochs = 1
+n_epochs = 10000
 batch_size = 100
 n_faces = 100
 ff_reader = data_reader(ff, batch_size)
@@ -108,7 +117,7 @@ with tf.Session() as sess:
         print("\r{}".format(epoch), "Total loss:", loss_val / X_batch.shape[0],
          "\tReconstruction loss:", reconstruction_loss_val / X_batch.shape[0],
           "\tLatent loss:", latent_loss_val / X_batch.shape[0])
-    
+
     # generating digits
     codings_rnd = np.random.normal(size=[n_faces, n_hidden3])
     outputs_val = outputs.eval(feed_dict={hidden3: codings_rnd})
@@ -116,8 +125,6 @@ with tf.Session() as sess:
 file_writer.close() # not really logging any cost summary, just wanting to get visual of graph
 
 # Plotting the generated digits
-# n_rows = 6
-# n_cols = 10
-# plot_multiple_images(outputs_val.reshape(-1, 28, 28), n_rows, n_cols)
-# save_fig("generated_digits_plot")
-# plt.show()
+img_rows, img_cols = 28, 20
+show_examples(outputs_val.reshape((-1, img_rows, img_cols)), n=100, n_cols=25)
+save_fig("generated_frey_faces")
